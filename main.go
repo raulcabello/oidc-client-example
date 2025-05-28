@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 
 	"github.com/coreos/go-oidc"
 	"golang.org/x/oauth2"
@@ -13,16 +16,17 @@ import (
 
 // Replace with your OIDC provider settings
 const (
-	clientID     = "oidc-client"
-	clientSecret = "BimPY6GrQCX2cYPJi3b1jxxAlci2/cS"
+	clientID     = "client-vh9wd2d747"
+	clientSecret = "secret-9zwbrkxbg57tmplmllgnqcphhxvcxc6kn4zhz9rxqh2g797477gm6tbb"
 	redirectURL  = "http://localhost:8088/callback"
-	issuerURL    = "https://92a29d075154.ngrok.app/oidc" // Replace with your provider's issuer URL
+	issuerURL    = "https://a4666acc1d0a.ngrok.app/oidc" // Replace with your provider's issuer URL
 )
 
 var (
 	provider     *oidc.Provider
 	oauth2Config oauth2.Config
 	verifier     *oidc.IDTokenVerifier
+	codeVerifier string
 )
 
 func main() {
@@ -41,7 +45,7 @@ func main() {
 		ClientSecret: clientSecret,
 		RedirectURL:  redirectURL,
 		Endpoint:     provider.Endpoint(),
-		Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
+		Scopes:       []string{oidc.ScopeOpenID, "profile", "offline_access"},
 	}
 
 	// Create an ID token verifier
@@ -51,6 +55,7 @@ func main() {
 	http.HandleFunc("/", handleHome)
 	http.HandleFunc("/login", handleLogin)
 	http.HandleFunc("/callback", handleCallback)
+	http.HandleFunc("/refresh", refreshToken)
 
 	log.Println("Server starting on http://localhost:8088")
 	log.Fatal(http.ListenAndServe(":8088", nil))
@@ -65,7 +70,8 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Redirect user to the OIDC provider's login page
-	http.Redirect(w, r, oauth2Config.AuthCodeURL("12345678910"), http.StatusFound)
+	codeVerifier = oauth2.GenerateVerifier()
+	http.Redirect(w, r, oauth2Config.AuthCodeURL("12345678910", oauth2.S256ChallengeOption(codeVerifier)), http.StatusFound)
 }
 
 func handleCallback(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +84,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange code for token
-	oauth2Token, err := oauth2Config.Exchange(ctx, r.URL.Query().Get("code"))
+	oauth2Token, err := oauth2Config.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(codeVerifier))
 	if err != nil {
 		http.Error(w, "Failed to exchange token: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -105,13 +111,66 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"token":  rawIDToken,
-		"claims": claims,
+		"token":         rawIDToken,
+		"claims":        claims,
+		"refresh_token": oauth2Token.Extra("refresh_token").(string),
 	}
 
 	// Write the response as JSON
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func refreshToken(w http.ResponseWriter, r *http.Request) {
+	data := url.Values{}
+	data.Set("grant_type", "refresh_token")
+	data.Set("refresh_token", r.URL.Query().Get("refresh_token"))
+	data.Set("client_id", clientID)
+	data.Set("client_secret", clientSecret)
+
+	req, err := http.NewRequest("POST", provider.Endpoint().TokenURL, bytes.NewBufferString(data.Encode()))
+	if err != nil {
+		fmt.Printf("Failed to create HTTP request: %v\n", err)
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Failed to send HTTP request: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		fmt.Printf("Failed to refresh token: %s\nResponse: %s\n", resp.Status, string(body))
+		return
+	}
+
+	//	body, _ := ioutil.ReadAll(resp.Body)
+	//	fmt.Printf("Refresh token: %s\n", string(body))
+
+	var tokenResponse struct {
+		AccessToken  string `json:"access_token"`
+		IDToken      string `json:"id_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+		TokenType    string `json:"token_type"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResponse); err != nil {
+		fmt.Printf("Failed to decode token response: %v\n", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(tokenResponse); err != nil {
 		http.Error(w, "Failed to encode response: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
