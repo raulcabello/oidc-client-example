@@ -16,10 +16,10 @@ import (
 
 // Replace with your OIDC provider settings
 const (
-	clientID     = "client-vh9wd2d747"
-	clientSecret = "secret-9zwbrkxbg57tmplmllgnqcphhxvcxc6kn4zhz9rxqh2g797477gm6tbb"
+	clientID     = "client-qj7zvvcmdn"
+	clientSecret = "secret-zn4h8n6khb482qk459vjwwwhjwqkqjfdght7cnwtrbmd7dqs74cqh5lk"
 	redirectURL  = "http://localhost:8088/callback"
-	issuerURL    = "https://a4666acc1d0a.ngrok.app/oidc" // Replace with your provider's issuer URL
+	issuerURL    = "https://ec2-35-179-134-209.eu-west-2.compute.amazonaws.com/oidc" // Replace with your provider's issuer URL
 )
 
 var (
@@ -34,7 +34,6 @@ func main() {
 
 	// Initialize OIDC provider
 	var err error
-	provider, err = oidc.NewProvider(ctx, issuerURL)
 	insecureTransport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
@@ -42,6 +41,7 @@ func main() {
 		Transport: insecureTransport,
 	}
 	ctx = oidc.ClientContext(ctx, insecureClient)
+	provider, err = oidc.NewProvider(ctx, issuerURL)
 
 	if err != nil {
 		log.Fatalf("Failed to get provider: %v", err)
