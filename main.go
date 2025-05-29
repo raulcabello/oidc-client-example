@@ -3,15 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"github.com/coreos/go-oidc"
+	"golang.org/x/oauth2"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
-
-	"github.com/coreos/go-oidc"
-	"golang.org/x/oauth2"
 )
 
 // Replace with your OIDC provider settings
@@ -35,6 +35,14 @@ func main() {
 	// Initialize OIDC provider
 	var err error
 	provider, err = oidc.NewProvider(ctx, issuerURL)
+	insecureTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	insecureClient := &http.Client{
+		Transport: insecureTransport,
+	}
+	ctx = oidc.ClientContext(ctx, insecureClient)
+
 	if err != nil {
 		log.Fatalf("Failed to get provider: %v", err)
 	}
